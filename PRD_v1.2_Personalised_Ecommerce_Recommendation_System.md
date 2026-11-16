@@ -1,10 +1,10 @@
-# PRD v1.1: AI-Based Personalized E-Commerce Recommendation System
+# PRD v1.2: AI-Based Personalised E-Commerce Recommendation System
 
-Nov 16, 2026 · @Tarik
+Nov 16, 2026 · Version 1.2
 
 ## 1. Overview and what changed
 
-This project is a MERN e-commerce site whose homepage shows genuinely personalised products, produced by a Python hybrid recommender (TF-IDF content filtering + item-based collaborative filtering). It is judged on the working engine, its integration, and an honest evaluation, not on the number of screens.
+The development team maintains the catalogue and demonstration data through the seed script and, when necessary, direct database maintenance during development. Customers can browse the catalogue, interact with products, and receive recommendations; they cannot create, edit, or delete catalogue products. The project is judged on the working recommendation engine, its integration, and an honest evaluation—not on the number of screens.
 
 **Goals**
 
@@ -18,18 +18,9 @@ This project is a MERN e-commerce site whose homepage shows genuinely personalis
 - Local MongoDB or Atlas free tier; everything runs on one laptop for the demo.
 - Dataset is synthetic and always labelled that way. No real customer data.
 
-**Changes from v1.0**
+**Changes in v1.2**
 
-| # | Change | Why |
-| --- | --- | --- |
-| 1 | The ML service reads MongoDB directly (read-only); Express sends only userId and limit | Item-based CF needs all users' interactions; v1.0 sent only one user's |
-| 2 | Interaction strength per user-item pair is capped and log-scaled; duplicate VIEWs within 30 minutes are ignored | Twenty views must not outweigh one purchase |
-| 3 | Express computes popularity with a MongoDB aggregation; it is also the fallback when the ML service is down | v1.0 left this owner undefined |
-| 4 | Checkout creates PURCHASE events and clears the cart; wishlist removal creates no event | v1.0 left checkout undefined |
-| 5 | Evaluation protocol fully defined, with several seeds and coverage added | v1.0 was too vague to trust |
-| 6 | Seed data grows to about 120 products and 40 users, generated from taste personas | 50 products and 15 users is too sparse for CF |
-| 7 | New Recommendation Lab page, demo quick-login, per-item explanations | Shows evaluators that the personalisation is real |
-| 8 | One-day plan replaced by a phased plan, ML core first | v1.0 assumed a team |
+- Catalogue data is maintained by the development team through deterministic seed data and direct database maintenance during development.
 
 ## 2. Scope
 
@@ -37,19 +28,19 @@ P0 is the minimum for a successful demo, P1 is built only after every P0 works, 
 
 | Priority | Feature |
 | --- | --- |
-| P0 | Register, login, JWT auth, role check (USER or ADMIN) |
-| P0 | Product catalogue with list, search, category filter, details |
+| P0 | Register, login and JWT authentication; the only account role is USER |
+| P0 | Product catalogue with list, search, category filter and product details |
 | P0 | Interaction tracking (VIEW, WISHLIST, ADD\_TO\_CART, PURCHASE) |
 | P0 | Content-based, collaborative and hybrid recommendations with fallbacks |
-| P0 | Homepage Recommended for You and Popular sections; Similar Products on details page |
-| P0 | Seed script with synthetic personas; evaluation script with real metrics |
-| P1 | Cart, wishlist, simulated checkout |
-| P1 | Recommendation Lab page (Popular vs Content vs CF vs Hybrid side by side) |
-| P1 | Admin product CRUD and basic dashboard counts |
+| P0 | Homepage Recommended for You and Popular sections; Similar Products on the details page |
+| P0 | Seed script with synthetic personas; evaluation script with reproducible metrics |
+| P1 | Cart, wishlist and simulated checkout |
+| P1 | Recommendation Lab page (Popular vs Content vs CF vs Hybrid side by side), available to signed-in users |
 | P1 | Demo quick-login buttons and reseed command |
 | P2 | Onboarding category picker for new users |
-| P2 | Admin user list, profile activity, sorting options |
 | P2 | Optional offline evaluation on a public dataset |
+
+**Catalogue ownership:** The development team owns catalogue creation and maintenance. Products are loaded by the seed script and may be maintained directly in MongoDB during development. There are no product-management APIs or UI for customers.
 
 **Out of scope:** real payments, shipping, chatbot or LLMs, computer vision, deep learning models, microservices beyond the one ML service, Docker or Kubernetes, real-time retraining, inventory, mobile apps.
 
@@ -57,7 +48,7 @@ If time slips, P1 and P2 are cut in that order. The engine and its evaluation ar
 
 ## 3. Architecture
 
-Three processes talk to one database: the React app calls Express, Express calls the FastAPI ML service, and both Express and the ML service use MongoDB. Express owns business logic and security; Python owns every recommendation score.
+Three processes talk to one database: the React app calls Express, Express calls the FastAPI ML service, and both Express and the ML service use MongoDB. Express owns business logic and security; Python owns every recommendation score. The application exposes customer read access to the catalogue only. The development team maintains products through seed data or direct database maintenance; no catalogue write endpoint is part of the application.
 
 &#91;embedded content: architecture - 4 components\]
 
@@ -65,9 +56,9 @@ React never talks to Python or MongoDB directly; the highlighted ML service only
 
 **Request flow for Recommended for You**
 
-1. React calls `GET /api/v1/recommendations/personalized` with the JWT.
-2. Express verifies the token, takes the user ID from it, and calls `POST /recommendations/personalized` on FastAPI with `userId` and `limit`.
-3. FastAPI reads products and all interactions from MongoDB (cached in memory, refreshed on a short timer and on demand), scores items, and returns ranked product IDs with scores and reason codes.
+1. React calls `GET /api/v1/recommendations/personalised` with the JWT.
+2. Express verifies the token, takes the user ID from it, and calls `POST /recommendations/personalised` on FastAPI with `userId` and `limit`.
+3. FastAPI reads products and all interactions from MongoDB (cached in memory and refreshed on a configured short interval), scores items, and returns ranked product IDs with scores and reason codes.
 4. Express loads the full product documents, attaches reason text, and returns them. If FastAPI is down or slow (2 second timeout), Express returns popular products with reason "Popular among other customers".
 
 **Folder structure**
@@ -96,7 +87,7 @@ MongoDB is the single source of truth, with three collections. Cart and wishlist
 
 | Collection | Fields | Rules and indexes |
 | --- | --- | --- |
-| users | name, email, passwordHash, role (USER or ADMIN), preferences.categories, cart\[\], wishlist\[\], isDemo, createdAt | Unique index on email; passwordHash never returned; ADMIN only via seed |
+| users | name, email, passwordHash, , preferences.categories, cart\[\], wishlist\[\], isDemo, createdAt | Unique index on email; passwordHash is never returned; every registered account is a USER |
 | products | name, description, category, brand, price, imageUrl, tags\[\], averageRating, isSynthetic, createdAt | Price at least 0; text fields required; index on category |
 | interactions | userId, productId, eventType, timestamp, source ("live" or "seed") | Indexes: userId, productId, timestamp, userId + timestamp; eventType limited to the four allowed values |
 
@@ -164,24 +155,21 @@ Every Express response uses `{ success, data }` or `{ success: false, message }`
 
 | Method | Endpoint | Access | Purpose |
 | --- | --- | --- | --- |
-| POST | /auth/register | public | Create USER account |
+| POST | /auth/register | public | Create a USER account |
 | POST | /auth/login | public | Returns JWT and user |
 | GET | /auth/me | user | Current user |
 | GET | /products | public | List with page, limit, category, sort |
 | GET | /products/search?q= | public | Text search |
 | GET | /products/categories | public | Category list |
 | GET | /products/:id | public | Product details |
-| POST, PUT, DELETE | /products, /products/:id | admin | Product CRUD |
 | POST | /interactions | user | Body: productId, eventType |
 | GET | /interactions/me | user | Own history |
 | GET, POST, DELETE | /cart, /wishlist | user | Manage lists; adding records an event |
 | POST | /cart/checkout | user | Records PURCHASE events, clears cart |
-| GET | /recommendations/personalized | user | Hybrid list, up to 10 |
+| GET | /recommendations/personalised | user | Hybrid list, up to 10 |
 | GET | /recommendations/similar/:productId | public | Up to 8 similar products |
 | GET | /recommendations/popular | public | Weighted popularity |
-| GET | /recommendations/lab | admin or demo | All four models for one user (Lab page) |
-| GET | /admin/dashboard | admin | Counts and top products |
-| GET | /admin/users | admin | Registered users |
+| GET | /recommendations/lab | user | All four models for the signed-in demo user (Lab page) |
 
 **Recommendation item shape returned to React**
 
@@ -199,10 +187,9 @@ Every Express response uses `{ success, data }` or `{ success: false, message }`
 | Method | Endpoint | Request | Response |
 | --- | --- | --- | --- |
 | GET | /health | none | status and counts of loaded products and interactions |
-| POST | /recommendations/personalized | userId, limit | list of productId, score, content, collab, reasonCode, sourceProductId |
+| POST | /recommendations/personalised | userId, limit | list of productId, score, content, collab, reasonCode, sourceProductId |
 | POST | /recommendations/similar | productId, limit | list of productId, score |
 | POST | /recommendations/compare | userId, limit | the four model lists for one user (Lab page) |
-| POST | /admin/refresh | none | Reload data from MongoDB |
 
 **Error handling.** Invalid IDs return 400, missing items 404, auth failures 401 or 403. ML timeouts or errors fall back to popularity, and the response notes `fallback: true` so the UI can show it.
 
@@ -213,7 +200,7 @@ All seed data is synthetic and is labelled that way in the database (`isSyntheti
 | Item | Target |
 | --- | --- |
 | Products | about 120 across 8 categories (for example Laptops, Gaming Accessories, Smartphones, Cameras, Audio, Fitness, Home Kitchen, Books), each with brand, tags, a 2 to 3 sentence description and a local placeholder image |
-| Demo users | about 40, plus one admin, plus 2 named demo users (Customer A gamer, Customer B photographer) with a known password |
+| Demo users | about 40, including 2 named demo users (Customer A gamer, Customer B photographer) with a known password |
 | Personas | 6 to 8 taste profiles; each user mostly interacts inside 1 or 2 persona categories, with about 15% random noise |
 | Interactions | about 25 to 40 per user, with realistic funnels (many VIEWs, fewer WISHLIST, fewer ADD\_TO\_CART, few PURCHASE) and timestamps spread over the last 60 days |
 | Cold-start users | 2 users with zero interactions and 3 products with zero interactions |
@@ -259,26 +246,30 @@ React + Vite + Tailwind CSS, responsive, with loading, error and empty states on
 | Product listing | Grid, category filter, search, price sort | P0 |
 | Product details | Image, description, brand, category, price, Add to cart, Add to wishlist, Similar Products; records a VIEW on open | P0 |
 | Cart and Wishlist | List, remove, total, simulated checkout | P1 |
-| Recommendation Lab | Pick a user; show Popular, Content, CF and Hybrid lists side by side with content and CF score bars per item | P1 |
-| Admin | Dashboard counts, top viewed, wishlisted and purchased products, product add, edit, delete | P1 |
+| Recommendation Lab | Show Popular, Content, CF and Hybrid lists side by side for the signed-in user, with content and CF score bars per item | P1 |
 | Profile | Account info and selected interests | P2 |
 
 Recommended for You shows each product's reason text, and a small "Why?" popover shows the content and collaborative scores. When the ML service is unavailable the section shows popular items with a short notice, never a blank space or a crash.
 
 ## 10. Non-functional requirements and testing
 
+**Account and catalogue access model**
+
+- There is exactly one account type: `USER`. Registration creates a USER account; clients cannot submit or change an account type.
+- Customers may read products and record their own interactions, cart and wishlist changes.
+- Product creation, editing and deletion are development/maintenance operations performed through the seed script or direct database maintenance. They are not exposed as application APIs or frontend screens.
+
 **Security**
 
 - Passwords hashed with bcrypt; JWT secret and database URI only in `.env`, which is never committed.
-- Role check middleware on every admin route; admin accounts exist only via the seed script.
 - Input validation (zod or express-validator), `helmet`, CORS limited to the frontend origin, rate limit on login.
 - Responses never include passwordHash. Invalid ObjectIds return 400.
-- The ML service listens on localhost only.
+- The ML service listens on localhost only; cache refresh is handled internally.
 
 **Performance and reliability**
 
 - Lists are paginated; recommendation limit is capped at 20.
-- ML data is cached in memory and refreshed on a timer and by `/admin/refresh`; the model is not rebuilt on every request.
+- ML data is cached in memory and refreshed by the ML service on a configured interval; the model is not rebuilt on every request.
 - Express calls the ML service with a 2 second timeout and falls back to popularity.
 
 **Testing**
@@ -286,7 +277,7 @@ Recommended for You shows each product's reason text, and a small "Why?" popover
 | Area | Checks |
 | --- | --- |
 | ML (pytest) | TF-IDF shape, cosine similarity on a hand-made example, item-item similarity, hybrid normalisation and weights, purchased and in-cart items excluded, cold-start fallback, empty dataset |
-| Backend | Register, duplicate email rejected, bad login rejected, protected and admin routes, interaction recorded with the JWT user, VIEW dedupe, checkout creates PURCHASE events |
+| Backend | Register, duplicate email rejected, bad login rejected, protected user routes, interaction recorded with the JWT user, VIEW deduplication, checkout creates PURCHASE events, no product-management routes are exposed |
 | Integration | React to Express to FastAPI to MongoDB; a new interaction changes the next recommendation; ML service stopped gives the popularity fallback |
 | Manual | The four demo scenarios in section 11 |
 
@@ -303,7 +294,7 @@ Nothing is reported as working until it has been run and checked.
 | 3. Evaluation | evaluate.py with split, 4 models, 5 metrics, multi-seed | Real results table printed and saved | 1 |
 | 4. Backend | Auth, products, interactions, cart, wishlist, checkout, recommendation routes with fallback | Postman collection passes | 2 |
 | 5. Frontend P0 | Auth, home, listing, details, recommendation sections | Demo scenarios A to D work in the browser | 2 |
-| 6. P1 and polish | Recommendation Lab, admin, quick-login, loading and empty states | Full demo rehearsal without errors | 1 |
+| 6. P1 and polish | Recommendation Lab, quick-login, loading and empty states | Full demo rehearsal without errors | 1 |
 | 7. Report and viva | README, report, PPT, viva question prep | Dry run presentation | 1 |
 
 **Acceptance criteria**
@@ -320,7 +311,7 @@ Nothing is reported as working until it has been run and checked.
 | AC-8 | Express reaches FastAPI; if FastAPI is stopped, the homepage still works | P0 |
 | AC-9 | Evaluation script prints real metrics for all four models | P0 |
 | AC-10 | Similar Products never includes the opened product | P0 |
-| AC-11 | Cart, wishlist, checkout, admin CRUD, dashboard, Recommendation Lab | P1 |
+| AC-11 | Cart, wishlist, checkout and Recommendation Lab work for signed-in users | P1 |
 
 **Demo script**
 
@@ -328,7 +319,7 @@ Nothing is reported as working until it has been run and checked.
 2. **Customer B:** log out, quick-login as the photographer, open cameras and a phone, wishlist a lens; the list is clearly different.
 3. **Cold start:** register a new account and open the homepage; popular or category products appear.
 4. **Similar products:** open any product; the list excludes the product itself.
-5. **Recommendation Lab:** choose Customer A and show Popular, Content, CF and Hybrid side by side.
+5. **Recommendation Lab:** while signed in as a demo customer, show Popular, Content, CF and Hybrid recommendations side by side for that account.
 6. **Evaluation:** show the saved metrics table, labelled synthetic.
 
 **Definition of done:** all P0 acceptance criteria pass; the three services start from the README in one go; the seed script resets the demo state; no recommendation is hardcoded; every reported number comes from a script run.
