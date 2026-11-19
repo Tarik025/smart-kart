@@ -38,7 +38,7 @@ const isMlServiceUnavailable = (error) => {
 
   const status = error.response?.status;
 
-  return !error.response || status >= 500;
+  return !error.response || status === 404 || status >= 500;
 };
 
 const handleMlServiceError = (error, message) => {
@@ -215,6 +215,142 @@ const getPopularFallback = async (user, limit) => {
   return getPopularityRankedProducts(limit, excludedIds);
 };
 
+const getSimilarFallback = async (sourceProduct, limit) => {
+  const sourceTags = new Set((sourceProduct.tags || []).map((tag) => tag.toLowerCase()));
+  const candidates = await Product.find({
+    _id: { $ne: sourceProduct._id },
+  }).lean();
+
+  return candidates
+    .map((product) => {
+      const sharedTags = (product.tags || []).filter((tag) =>
+        sourceTags.has(tag.toLowerCase())
+      ).length;
+      const score =
+        (product.category === sourceProduct.category ? 5 : 0) +
+        sharedTags * 2 +
+        (product.brand === sourceProduct.brand ? 1 : 0) +
+        (product.averageRating || 0) / 5;
+
+      return { product, score, sharedTags };
+    })
+    .sort((a, b) => b.score - a.score || b.product.price - a.product.price)
+    .slice(0, limit)
+    .map(({ product, score }) => ({
+      product,
+      score,
+      reason: {
+        code: "CONTENT",
+        text: `Similar to ${sourceProduct.name}`,
+        sourceProductId: sourceProduct._id,
+      },
+      breakdown: { content: score, collab: 0 },
+    }));
+};
+
+const getCollaborativeFallback = async (user, limit, popular) => {
+  const userProductIds = await Interaction.distinct("productId", {
+    userId: user._id,
+  });
+
+  if (!userProductIds.length) return popular;
+
+  const peers = await Interaction.aggregate([
+    {
+      $match: {
+        productId: { $in: userProductIds },
+        userId: { $ne: user._id },
+      },
+    },
+    { $group: { _id: "$userId", overlap: { $sum: 1 } } },
+    { $sort: { overlap: -1 } },
+    { $limit: 20 },
+  ]);
+  const peerIds = peers.map((peer) => peer._id);
+
+  if (!peerIds.length) return popular;
+
+  const scores = await Interaction.aggregate([
+    {
+      $match: {
+        userId: { $in: peerIds },
+        productId: { $nin: userProductIds },
+      },
+    },
+    {
+      $group: {
+        _id: "$productId",
+        score: {
+          $sum: {
+            $switch: {
+              branches: [
+                { case: { $eq: ["$eventType", "VIEW"] }, then: 1 },
+                { case: { $eq: ["$eventType", "WISHLIST"] }, then: 3 },
+                { case: { $eq: ["$eventType", "ADD_TO_CART"] }, then: 4 },
+                { case: { $eq: ["$eventType", "PURCHASE"] }, then: 5 },
+              ],
+              default: 0,
+            },
+          },
+        },
+      },
+    },
+    { $sort: { score: -1 } },
+    { $limit: limit },
+  ]);
+  const productIds = scores.map((item) => item._id);
+  const products = await Product.find({ _id: { $in: productIds } }).lean();
+  const scoreMap = new Map(scores.map((item) => [item._id.toString(), item.score]));
+  const collaborative = products
+    .map((product) => ({
+      product,
+      score: scoreMap.get(product._id.toString()) || 0,
+      reason: {
+        code: "COLLABORATIVE",
+        text: "Customers with similar interests liked this",
+      },
+      breakdown: {
+        content: 0,
+        collab: scoreMap.get(product._id.toString()) || 0,
+      },
+    }))
+    .sort((a, b) => b.score - a.score);
+  const seen = new Set(collaborative.map((item) => item.product._id.toString()));
+
+  return [
+    ...collaborative,
+    ...popular.filter((item) => !seen.has(item.product._id.toString())),
+  ].slice(0, limit);
+};
+
+const getRecommendationLabFallback = async (user, limit) => {
+  const popular = await getPopularFallback(user, limit);
+  const latestInteraction = await Interaction.findOne({ userId: user._id })
+    .sort({ timestamp: -1 })
+    .lean();
+  const sourceProduct = latestInteraction
+    ? await Product.findById(latestInteraction.productId).lean()
+    : null;
+  const content = sourceProduct
+    ? await getSimilarFallback(sourceProduct, limit)
+    : popular;
+  const collaborative = await getCollaborativeFallback(user, limit, popular);
+  const hybrid = [...content, ...collaborative]
+    .filter((item, index, items) =>
+      items.findIndex((candidate) =>
+        candidate.product._id.equals(item.product._id)
+      ) === index
+    )
+    .slice(0, limit);
+
+  return {
+    popular,
+    content,
+    collaborative,
+    hybrid,
+  };
+};
+
 // --------------------------------------------------
 // PERSONALISED RECOMMENDATIONS
 // --------------------------------------------------
@@ -242,8 +378,9 @@ const getPersonalisedRecommendationsController = asyncHandler(
 
       console.error("ML service unavailable. Using popularity fallback.");
 
-      recommendations = await getPopularFallback(req.user, limit);
-      strategy = "popularity_fallback";
+      const fallbackModels = await getRecommendationLabFallback(req.user, limit);
+      recommendations = fallbackModels.hybrid;
+      strategy = "local_hybrid_fallback";
       fallback = true;
     }
 
@@ -274,25 +411,27 @@ const getSimilarProductsController = asyncHandler(
     }
 
     const limit = getLimit(req.query.limit, 8, 8);
+    const sourceProduct = await Product.findById(productId).lean();
 
-    const productExists = await Product.exists({ _id: productId });
-
-    if (!productExists) {
+    if (!sourceProduct) {
       throw new ApiError(404, "Product not found");
     }
 
-    let result;
+    let recommendations;
 
     try {
-      result = await getSimilarProducts(productId, limit);
+      const result = await getSimilarProducts(productId, limit);
+      recommendations = await enrichRecommendations(result.data || []);
     } catch (error) {
-      handleMlServiceError(
-        error,
-        "Similar products service is temporarily unavailable"
-      );
-    }
+      if (!isMlServiceUnavailable(error)) {
+        handleMlServiceError(
+          error,
+          "Similar products service is temporarily unavailable"
+        );
+      }
 
-    const recommendations = await enrichRecommendations(result.data || []);
+      recommendations = await getSimilarFallback(sourceProduct, limit);
+    }
 
     return res.status(200).json(
       new ApiResponse(
@@ -338,9 +477,21 @@ const getRecommendationLabController = asyncHandler(
     try {
       result = await compareRecommendations(userId, limit);
     } catch (error) {
-      handleMlServiceError(
-        error,
-        "Recommendation comparison service is temporarily unavailable"
+      if (!isMlServiceUnavailable(error)) {
+        handleMlServiceError(
+          error,
+          "Recommendation comparison service is temporarily unavailable"
+        );
+      }
+
+      const fallbackModels = await getRecommendationLabFallback(req.user, limit);
+
+      return res.status(200).json(
+        new ApiResponse(
+          200,
+          fallbackModels,
+          "Recommendation models fetched using local fallback"
+        )
       );
     }
 

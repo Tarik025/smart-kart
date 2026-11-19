@@ -8,9 +8,18 @@ import ApiResponse from "../utils/ApiResponse.js";
 import asyncHandler from "../utils/asyncHandler.js";
 
 const createAccessToken = (userId) => {
+  const secret = process.env.JWT_SECRET;
+
+  if (!secret || secret.length < 32) {
+    throw new ApiError(
+      503,
+      "Authentication is not configured. Add a private JWT_SECRET with at least 32 characters to the server environment."
+    );
+  }
+
   return jwt.sign(
     { sub: userId.toString() },
-    process.env.JWT_SECRET,
+    secret,
     {
       expiresIn: process.env.JWT_EXPIRES_IN || "1d",
     }
