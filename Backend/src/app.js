@@ -24,6 +24,16 @@ app.use(express.urlencoded({ extended: true, limit: "16kb" }));
 app.use(express.static("public"));
 app.use(cookieParser());
 
+// API entry point
+app.get("/", (req, res) => {
+  res.status(200).json({
+    success: true,
+    name: "Smart Kart API",
+    message: "The API is running. The storefront is served separately from the Frontend app.",
+    health: "/api/v1/health",
+  });
+});
+
 // Health check
 app.get("/api/v1/health", (req, res) => {
   res.status(200).json({
