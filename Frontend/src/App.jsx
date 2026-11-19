@@ -8,12 +8,23 @@ const demoAccounts = [
   { label: "Cold start", email: "coldstart.b@example.com", password: "Demo@12345" },
 ];
 const art = {
-  Laptops: "photo-1496181133206-80ce9b88a853", "Gaming Accessories": "photo-1612287230202-1ff1d85d1bdf",
-  Smartphones: "photo-1511707171634-5f897ff02aa9", Cameras: "photo-1516035069371-29a1b244cc32",
-  Audio: "photo-1505740420928-5e560c06d30e", Fitness: "photo-1538805060514-97d9cc17730c",
-  "Home Kitchen": "photo-1556911220-e15b29be8c8f", Books: "photo-1544947950-fa07a98d237f",
+  Laptops: ["photo-1496181133206-80ce9b88a853", "photo-1498050108023-c5249f4df085", "photo-1517336714731-489689fd1ca8", "photo-1588872657578-7efd1f1555ed", "photo-1525547719571-a2d4ac8945e2"],
+  "Gaming Accessories": ["photo-1612287230202-1ff1d85d1bdf", "photo-1593305841991-05c297ba4575", "photo-1598550476439-6847785fcea6", "photo-1615663245857-ac93bb7c39e7", "photo-1587202372775-e229f172b9d7"],
+  Smartphones: ["photo-1511707171634-5f897ff02aa9", "photo-1592750475338-74b7b21085ab", "photo-1598327105666-5b89351aff97", "photo-1510557880182-3d4d3cba35a5", "photo-1605236453806-6ff36851218e"],
+  Cameras: ["photo-1516035069371-29a1b244cc32", "photo-1502920917128-1aa500764cbd", "photo-1510127034890-2e54d6f1c5b9", "photo-1519183071298-a2962be90b8e", "photo-1512790182412-b19e6d62bc39"],
+  Audio: ["photo-1505740420928-5e560c06d30e", "photo-1484704849700-f032a568e944", "photo-1546435770-a3e426bf472b", "photo-1583394838336-acd977736f90", "photo-1590658268037-6bf12165a8df"],
+  Fitness: ["photo-1538805060514-97d9cc17730c", "photo-1579758629938-03607ccdbaba", "photo-1517836357463-d25dfeac3438", "photo-1544367567-0f2fcb009e0b", "photo-1518611012118-696072aa579a"],
+  "Home Kitchen": ["photo-1556911220-e15b29be8c8f", "photo-1556912172-45b7abe8b7e1", "photo-1556909114-f6e7ad7d3136", "photo-1556910103-1c02745aae4d", "photo-1556911220-bff31c812dba"],
+  Books: ["photo-1544947950-fa07a98d237f", "photo-1512820790803-83ca734da794", "photo-1543002588-bfa74002ed7e", "photo-1519682337058-a94d519337bc", "photo-1495446815901-a7297e633e8d"],
 };
-const imageFor = (product) => product?.imageUrl && !product.imageUrl.includes("placeholder") ? product.imageUrl : `https://images.unsplash.com/${art[product?.category] || "photo-1523275335684-37898b6baf30"}?auto=format&fit=crop&w=900&q=85`;
+const imageFor = (product) => {
+  if (product?.imageUrl && !product.imageUrl.includes("placeholder")) return product.imageUrl;
+  const choices = art[product?.category] || ["photo-1523275335684-37898b6baf30"];
+  const name = `${product?.brand || ""} ${product?.name || ""}`;
+  const hash = [...name].reduce((value, character) => (value * 31 + character.charCodeAt(0)) >>> 0, 7);
+  const photo = choices[hash % choices.length];
+  return `https://images.unsplash.com/${photo}?auto=format&fit=crop&w=900&q=85`;
+};
 const unwrap = (payload) => payload?.data ?? payload;
 const money = (value) => new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(value || 0);
 
