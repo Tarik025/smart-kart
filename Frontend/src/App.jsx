@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowDownUp, ArrowRight, ArrowUpRight, BadgeCheck, Bookmark, Check, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Heart, LayoutGrid, LoaderCircle, LogIn, LogOut, Menu, Search, ShoppingBag, Sparkles, Star, WandSparkles, X } from "lucide-react";
 
-const API = import.meta.env.VITE_API_URL || "http://localhost:8000/api/v1";
+const API = import.meta.env.VITE_API_URL || "/api/v1";
 const demoAccounts = [
   { label: "Customer A · Gamer", email: "customer.a@example.com", password: "Demo@12345" },
   { label: "Customer B · Photographer", email: "customer.b@example.com", password: "Demo@12345" },
